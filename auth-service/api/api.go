@@ -18,7 +18,6 @@ import (
 )
 
 const (
-	jwtTokenSize    = 128
 	verifyTokenSize = 6
 	resetTokenSize  = 6
 )
@@ -136,7 +135,7 @@ func signup(w http.ResponseWriter, r *http.Request) {
 	})
 
 	//Generate refresh token
-	var refreshExpiresAt = time.Now().Add(DefaultAccessJWTExpiry)
+	var refreshExpiresAt = time.Now().Add(DefaultRefreshJWTExpiry)
 	var refreshToken string
 	refreshToken, err = setClaims(AuthClaims{
 		UserID: userID,
