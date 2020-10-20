@@ -27,7 +27,7 @@ func InitDB() *sql.DB {
 	dbType := "mysql"
 	username := "root"
 	password := "root"
-	ipAddress := "tcp(172.28.1.2)"
+	ipAddress := "tcp(172.28.1.2:3306)"
 	dbName := "/auth"
 	
 	if err != nil {
