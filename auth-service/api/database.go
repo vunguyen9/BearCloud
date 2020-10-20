@@ -24,6 +24,11 @@ func InitDB() *sql.DB {
 	// Assign the connection to the "DB" variable
 	// Look at how it's done in the other microservices!
 	// "YOUR CODE HERE"
+	dbType := "mysql"
+	username := "root"
+	password := "root"
+	ipAddress := "tcp(172.28.1.2)"
+	dbName := "/auth"
 	
 	if err != nil {
 		log.Println("couldnt connect")
