@@ -16,10 +16,10 @@ import (
 func RegisterRoutes(router *mux.Router) error {
 	// Why don't we put options here? Check main.go :)
 
-	router.HandleFunc("/api/posts/{startIndex}", getFeed).Methods(/* YOUR CODE HERE */) 
-	router.HandleFunc("/api/posts/{uuid}/{startIndex}", getPosts).Methods(/* YOUR CODE HERE */)
-	router.HandleFunc("/api/posts/create", createPost).Methods(/* YOUR CODE HERE */)
-	router.HandleFunc("/api/posts/delete/{postID}", deletePost).Methods(/* YOUR CODE HERE */)
+	router.HandleFunc("/api/posts/{startIndex}", getFeed).Methods(http.MethodGet) 
+	router.HandleFunc("/api/posts/{uuid}/{startIndex}", getPosts).Methods(http.MethodGet)
+	router.HandleFunc("/api/posts/create", createPost).Methods(http.MethodPost)
+	router.HandleFunc("/api/posts/delete/{postID}", deletePost).Methods(http.MethodPost)
 
 	return nil
 }
@@ -116,12 +116,37 @@ func createPost(w http.ResponseWriter, r *http.Request) {
 	// Obtain the userID from the JSON Web Token
 	// See getUUID(...)
 	// YOUR CODE HERE
+	cookie, err := r.Cookie("access_token")
+	if err != nil {
+		http.Error(w, errors.New("error obtaining cookie: " + err.Error()).Error(), http.StatusBadRequest)
+		log.Print(err.Error())
+	}
+
+	claims, err := ValidateToken(cookie.Value)
+	if err != nil {
+		http.Error(w, errors.New("error validating token: " + err.Error()).Error(), http.StatusUnauthorized)
+		log.Print(err.Error())
+	}
+	log.Println(claims)
+
+	userID := claims["UserID"]//.(string)
 
 	// Create a Post object and then Decode the JSON Body (which has the structure of a Post) into that object
 	// YOUR CODE HERE
+	post := Post{}
+
+	jsonDecoder := json.NewDecoder(r.Body)
+
+	err = jsonDecoder.Decode(&Post)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	// Use the uuid library to generate a post ID
 	// Hint: https://godoc.org/github.com/google/uuid#New
+	uuidWithHyphen := uuid.New()
+	postID := strings.Replace(uuidWithHyphen.String(), "-", "", -1)
 
 	//Load our location in PST
 	pst, err := time.LoadLocation("America/Los_Angeles")
@@ -132,19 +157,35 @@ func createPost(w http.ResponseWriter, r *http.Request) {
 
 	// Insert the post into the database
 	// Look at /db-server/initdb.sql for a better understanding of what you need to insert
-	result , err = DB.Exec("YOUR CODE HERE", /* YOUR CODE HERE */, /* YOUR CODE HERE */, /* YOUR CODE HERE */, /* YOUR CODE HERE */)
+	result , err = DB.Exec("INSERT INTO posts(content, postID, authorID, postTime) VALUES(?, ?, ?, ?)", post.PostBody, postID, userID, time.Now())
 	
 	// Check errors with executing the query
 	// YOUR CODE HERE
+	if err != nil {
+		log.Print(err.Error())
+		http.Error(w, "Server error, unable to create your account.", 500)
+	}
 
 	// Make sure at least one row was affected, otherwise return an InternalServerError
 	// You did something very similar in Checkpoint 2
 	// YOUR CODE HERE
+	var exists bool
+	err = DB.QueryRow("SELECT exists(SELECT * FROM posts WHERE postID=?)", postID).Scan(&exists)
+
+	if err != nil {
+		http.Error(w, errors.New("error creating new post").Error(), http.StatusInternalServerError)
+		log.Print(err.Error())
+		return
+	}
+	if exists == false {
+		http.Error(w, errors.New("new post not existed").Error(), http.StatusNotFound)
+		return
+	}
 
 	// What kind of HTTP header should we return since we created something?
 	// Check your signup from Checkpoint 2!
 	// YOUR CODE HERE
-
+	w.WriteHeader(http.StatusCreated)
 	return
 }
 
@@ -153,37 +194,76 @@ func deletePost(w http.ResponseWriter, r *http.Request) {
 	// Get the postID to delete
 	// Look at mux.Vars() ... -> https://godoc.org/github.com/gorilla/mux#Vars
 	// YOUR CODE HERE
-
+	postID := mux.Vars(r)["postID"]
 
 	// Get the uuid from the access token, see getUUID(...)
 	// YOUR CODE HERE
+	cookie, err := r.Cookie("access_token")
+	if err != nil {
+		http.Error(w, errors.New("error obtaining cookie: " + err.Error()).Error(), http.StatusBadRequest)
+		log.Print(err.Error())
+	}
+	
+	claims, err := ValidateToken(cookie.Value)
+	if err != nil {
+		http.Error(w, errors.New("error validating token: " + err.Error()).Error(), http.StatusUnauthorized)
+		log.Print(err.Error())
+	}
+	log.Println(claims)
+
+	uuid := claims["UserID"]
+
 
 	var exists bool
 	//check if post exists
-	err := DB.QueryRow("YOUR CODE HERE", /* YOUR CODE HERE */).Scan(/* YOUR CODE HERE */)
+	err = DB.QueryRow("SELECT exists(SELECT * FROM posts WHERE postID=?)", postID).Scan(&exists)
 
 	// Check for errors in executing the query
 	// YOUR CODE HERE
+	if err != nil {
+		http.Error(w, errors.New("error checking if postID exists").Error(), http.StatusInternalServerError)
+		log.Print(err.Error())
+		return
+	}
 
 	// Check if the post actually exists, otherwise return an http.StatusNotFound
 	// YOUR CODE HERE
+	if exists == false {
+		http.Error(w, errors.New("postID not existed").Error(), http.StatusNotFound)
+		return
+	}
 
 	// Get the authorID of the post with the specified postID
 	var authorID string
-	err = DB.QueryRow("YOUR CODE HERE", /* YOUR CODE HERE */).Scan(/* YOUR CODE HERE */)
+	err = DB.QueryRow("SELECT authorID FROM users WHERE postID=?", postID).Scan(&authorID)
 	
 	// Check for errors in executing the query
 	// YOUR CODE HERE
+	if err != nil {
+		http.Error(w, errors.New("error select authorID").Error(), http.StatusBadRequest)
+		log.Print(err.Error())
+		return
+	}
 
 	// Check if the uuid from the access token is the same as the authorID from the query
 	// If not, return http.StatusUnauthorized
 	// YOUR CODE HERE
+	if authorID != uuid {
+		http.Error(w, errors.New("userID not same as uuid").Error(), http.StatusUnauthorized)
+		log.Print(err.Error())
+		return
+	}
 
 	// Delete the post since by now we're authorized to do so
-	_, err = DB.Exec("YOUR CODE HERE", /* YOUR CODE HERE */)
+	_, err = DB.Exec("DELETE FROM posts WHERE authorID=?", authorID/)
 	
 	// Check for errors in executing the query
 	// YOUR CODE HERE
+	if err != nil {
+		http.Error(w, errors.New("error deleting").Error(), http.StatusInternalServerError)
+		log.Print(err.Error())
+		return
+	}
 
 	return
 }

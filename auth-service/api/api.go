@@ -131,10 +131,7 @@ func signup(w http.ResponseWriter, r *http.Request) {
 	// YOUR CODE HERE
 	if err != nil {
 		log.Print(err.Error())
-		log.Print(username)
-		log.Print(email)
-		log.Print(hashedPassword)
-		http.Error(w, "Server error, unable to create your account 2.", 500)
+		http.Error(w, "Server error, unable to create your account.", 500)
 	}
 
 	//Generate an access token, expiry dates are in Unix time
@@ -355,7 +352,6 @@ func verify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	//Obtain the user with the verifiedToken from the query parameter and set their verification status to the integer "1"
-	// sqlStatement := `UPDATE users SET verified = $1 WHERE verifiedToken = $2;`
 	_, err := DB.Exec("UPDATE users SET verified=? WHERE verifiedToken=?", 1, token)
 
 	//Check for errors in executing the previous query
@@ -401,7 +397,6 @@ func sendReset(w http.ResponseWriter, r *http.Request) {
 	token := GetRandomBase62(resetTokenSize)
 
 	//Obtain the user with the specified email and set their resetToken to the token we generated
-	// sqlStatement := `UPDATE users SET resetToken = $1 WHERE email = $2;`
 	_, err = DB.Query("UPDATE users SET resetToken=? WHERE email=?", token, credentials.Email)
 
 	//Check for errors executing the queries
@@ -456,8 +451,7 @@ func resetPassword(w http.ResponseWriter, r *http.Request) {
 	password := credentials.Password
 	var exists bool
 	//check if the username and token pair exist
-	sqlStatement := `SELECT exists(SELECT * FROM users WHERE username=$1 AND resetToken=$2)`
-	err = DB.QueryRow(sqlStatement, username, token).Scan(&exists)
+	err = DB.QueryRow("SELECT exists(SELECT * FROM users WHERE username=? AND resetToken=?)", username, token).Scan(&exists)
 
 	//Check for errors executing the query
 	// "YOUR CODE HERE"
@@ -470,7 +464,7 @@ func resetPassword(w http.ResponseWriter, r *http.Request) {
 	//Check exists boolean. Call an error if the username-token pair doesn't exist
 	// "YOUR CODE HERE"
 	if exists == false {
-		http.Error(w, errors.New("this username and token don't exist").Error(), http.StatusConflict)
+		http.Error(w, errors.New("this username and token don't exist").Error(), http.StatusNotFound)
 		return
 	}
 
@@ -485,7 +479,6 @@ func resetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	//input new password and clear the reset token (set the token equal to empty string)
-	// sqlStatement2 := `UPDATE users SET hashedPassword = $1, verifiedToken = $2 WHERE username = $3;`
 	_, err = DB.Exec("UPDATE users SET hashedPassword=?, verifiedToken=? WHERE username=?", hashedPassword, "", username)
 
 	if err != nil {
