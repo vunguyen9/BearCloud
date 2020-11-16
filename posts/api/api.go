@@ -1,39 +1,40 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
+
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
-	"database/sql"
-	"strconv"
 )
-
 
 func RegisterRoutes(router *mux.Router) error {
 	// Why don't we put options here? Check main.go :)
 
-	router.HandleFunc("/api/posts/{startIndex}", getFeed).Methods(http.MethodGet) 
+	router.HandleFunc("/api/posts/{startIndex}", getFeed).Methods(http.MethodGet)
 	router.HandleFunc("/api/posts/{uuid}/{startIndex}", getPosts).Methods(http.MethodGet)
 	router.HandleFunc("/api/posts/create", createPost).Methods(http.MethodPost)
-	router.HandleFunc("/api/posts/delete/{postID}", deletePost).Methods(http.MethodPost)
+	router.HandleFunc("/api/posts/delete/{postID}", deletePost).Methods(http.MethodDelete)
 
 	return nil
 }
 
-func getUUID (w http.ResponseWriter, r *http.Request) (uuid string) {
+func getUUID(w http.ResponseWriter, r *http.Request) (uuid string) {
 	cookie, err := r.Cookie("access_token")
 	if err != nil {
-		http.Error(w, errors.New("error obtaining cookie: " + err.Error()).Error(), http.StatusBadRequest)
+		http.Error(w, errors.New("error obtaining cookie: "+err.Error()).Error(), http.StatusBadRequest)
 		log.Print(err.Error())
 	}
 	//validate the cookie
 	claims, err := ValidateToken(cookie.Value)
 	if err != nil {
-		http.Error(w, errors.New("error validating token: " + err.Error()).Error(), http.StatusUnauthorized)
+		http.Error(w, errors.New("error validating token: "+err.Error()).Error(), http.StatusUnauthorized)
 		log.Print(err.Error())
 	}
 	log.Println(claims)
@@ -48,53 +49,86 @@ func getPosts(w http.ResponseWriter, r *http.Request) {
 	// make sure to use "strconv" to convert the startIndex to an integer!
 	// YOUR CODE HERE
 
+	startIndex, _ := strconv.Atoi(mux.Vars(r)["startIndex"])
 
 	// Check if the user is authorized
 	// First get the uuid from the access_token (see getUUID())
 	// Compare that to the uuid we got from the url parameters, if they're not the same, return an error http.StatusUnauthorized
 	// YOUR CODE HERE
-	
-	var posts *sql.Rows
-	var err error
+	cookie, err := r.Cookie("access_token")
+	if err != nil {
+		http.Error(w, errors.New("error obtaining cookie: "+err.Error()).Error(), http.StatusBadRequest)
+		log.Print(err.Error())
+	}
+	claims, err := ValidateToken(cookie.Value)
+	if err != nil {
+		http.Error(w, errors.New("error validating token: "+err.Error()).Error(), http.StatusUnauthorized)
+		log.Print(err.Error())
+	}
+	log.Println(claims)
 
-	/* 
+	userID := claims["UserID"].(string)
+	uuid := mux.Vars(r)["uuid"]
+	// uuid, _ := strconv.Atoi(mux.Vars(r)["uuid"])
+
+	if userID != uuid {
+		http.Error(w, errors.New("userID not same as uuid").Error(), http.StatusUnauthorized)
+		log.Print(err.Error())
+		return
+	}
+
+	var posts *sql.Rows
+	// var err error
+
+	/*
 		-Get all that posts that matches our userID (or uuid)
 		-Sort them chronologically (the database has a "postTime" field), hint: ORDER BY
 		-Make sure to always get up to 25, and start with an offset of {startIndex} (look at the previous SQL homework for hints)\
 		-As indicated by the "posts" variable, this query returns multiple rows
 	*/
-	posts, err = DB.Query("YOUR CODE HERE", /* YOUR CODE HERE */, /* YOUR CODE HERE */)
-	
+	// userID = userID.(string)
+	posts, err = DB.Query("SELECT * FROM posts WHERE authorID=? ORDER BY postTime LIMIT ?, 25", userID, startIndex)
+
 	// Check for errors from the query
 	// YOUR CODE HERE
-
+	if err != nil {
+		http.Error(w, errors.New("error retrieve 25 posts").Error(), http.StatusBadRequest)
+		log.Print(err.Error())
+		return
+	}
 
 	var (
-		content string
-		postID string
-		userid string
+		content  string
+		postID   string
+		userid   string
 		postTime time.Time
 	)
 	numPosts := 0
 	// Create "postsArray", which is a slice (array) of Posts. Make sure it has size 25
 	// Hint: https://tour.golang.org/moretypes/13
-	postsArray := /* YOUR CODE HERE */
+	postsArray := make([]Post, 25)
 
 	for i := 0; i < 25 && posts.Next(); i++ {
 		// Every time we call posts.Next() we get access to the next row returned from our query
 		// Question: How many columns did we return
 		// Reminder: Scan() scans the rows in order of their columns. See the variables defined up above for your convenience
-		err = posts.Scan(/* YOUR CODE HERE */, /* YOUR CODE HERE */, /* YOUR CODE HERE */, /* YOUR CODE HERE */)
-		
+		err = posts.Scan(&content, &postID, &userid, &postTime)
+
 		// Check for errors in scanning
 		// YOUR CODE HERE
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Print(err.Error())
+		}
 
 		// Set the i-th index of postsArray to a new Post with values directly from the variables you just scanned into
 		// Check post.go for the structure of a Post
-		// Hint: https://gobyexample.com/structs 
-		
+		// Hint: https://gobyexample.com/structs
+
 		//YOUR CODE HERE
 		numPosts++
+
+		postsArray[i] = Post{PostBody: content, PostID: postID, AuthorID: userid, PostTime: postTime}
 	}
 
 	posts.Close()
@@ -103,13 +137,13 @@ func getPosts(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		log.Print(err.Error())
 	}
-  //encode fetched data as json and serve to client
-  // Up until now, we've actually been counting the number of posts (numPosts)
-  // We will always have *up to* 25 posts, but we can have less
-  // However, we already allocated 25 spots in oru postsArray
-  // Return the subarray that contains all of our values (which may be a subsection of our array or the entire array)
-  json.NewEncoder(w).Encode(/* YOUR CODE HERE */)
-  return;
+	//encode fetched data as json and serve to client
+	// Up until now, we've actually been counting the number of posts (numPosts)
+	// We will always have *up to* 25 posts, but we can have less
+	// However, we already allocated 25 spots in oru postsArray
+	// Return the subarray that contains all of our values (which may be a subsection of our array or the entire array)
+	json.NewEncoder(w).Encode(postsArray[:numPosts])
+	return
 }
 
 func createPost(w http.ResponseWriter, r *http.Request) {
@@ -118,18 +152,18 @@ func createPost(w http.ResponseWriter, r *http.Request) {
 	// YOUR CODE HERE
 	cookie, err := r.Cookie("access_token")
 	if err != nil {
-		http.Error(w, errors.New("error obtaining cookie: " + err.Error()).Error(), http.StatusBadRequest)
+		http.Error(w, errors.New("error obtaining cookie: "+err.Error()).Error(), http.StatusBadRequest)
 		log.Print(err.Error())
 	}
 
 	claims, err := ValidateToken(cookie.Value)
 	if err != nil {
-		http.Error(w, errors.New("error validating token: " + err.Error()).Error(), http.StatusUnauthorized)
+		http.Error(w, errors.New("error validating token: "+err.Error()).Error(), http.StatusUnauthorized)
 		log.Print(err.Error())
 	}
 	log.Println(claims)
 
-	userID := claims["UserID"]//.(string)
+	userID := claims["UserID"].(string)
 
 	// Create a Post object and then Decode the JSON Body (which has the structure of a Post) into that object
 	// YOUR CODE HERE
@@ -137,7 +171,7 @@ func createPost(w http.ResponseWriter, r *http.Request) {
 
 	jsonDecoder := json.NewDecoder(r.Body)
 
-	err = jsonDecoder.Decode(&Post)
+	err = jsonDecoder.Decode(&post)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -157,8 +191,8 @@ func createPost(w http.ResponseWriter, r *http.Request) {
 
 	// Insert the post into the database
 	// Look at /db-server/initdb.sql for a better understanding of what you need to insert
-	result , err = DB.Exec("INSERT INTO posts(content, postID, authorID, postTime) VALUES(?, ?, ?, ?)", post.PostBody, postID, userID, time.Now())
-	
+	_, err = DB.Exec("INSERT INTO posts(content, postID, authorID, postTime) VALUES(?, ?, ?, ?)", post.PostBody, postID, userID, currPST)
+
 	// Check errors with executing the query
 	// YOUR CODE HERE
 	if err != nil {
@@ -200,19 +234,18 @@ func deletePost(w http.ResponseWriter, r *http.Request) {
 	// YOUR CODE HERE
 	cookie, err := r.Cookie("access_token")
 	if err != nil {
-		http.Error(w, errors.New("error obtaining cookie: " + err.Error()).Error(), http.StatusBadRequest)
+		http.Error(w, errors.New("error obtaining cookie: "+err.Error()).Error(), http.StatusBadRequest)
 		log.Print(err.Error())
 	}
-	
+
 	claims, err := ValidateToken(cookie.Value)
 	if err != nil {
-		http.Error(w, errors.New("error validating token: " + err.Error()).Error(), http.StatusUnauthorized)
+		http.Error(w, errors.New("error validating token: "+err.Error()).Error(), http.StatusUnauthorized)
 		log.Print(err.Error())
 	}
 	log.Println(claims)
 
-	uuid := claims["UserID"]
-
+	uuid := claims["UserID"].(string)
 
 	var exists bool
 	//check if post exists
@@ -235,8 +268,8 @@ func deletePost(w http.ResponseWriter, r *http.Request) {
 
 	// Get the authorID of the post with the specified postID
 	var authorID string
-	err = DB.QueryRow("SELECT authorID FROM users WHERE postID=?", postID).Scan(&authorID)
-	
+	err = DB.QueryRow("SELECT authorID FROM posts WHERE postID=?", postID).Scan(&authorID)
+
 	// Check for errors in executing the query
 	// YOUR CODE HERE
 	if err != nil {
@@ -244,19 +277,19 @@ func deletePost(w http.ResponseWriter, r *http.Request) {
 		log.Print(err.Error())
 		return
 	}
-
+	log.Println(authorID)
+	log.Println(uuid)
 	// Check if the uuid from the access token is the same as the authorID from the query
 	// If not, return http.StatusUnauthorized
 	// YOUR CODE HERE
 	if authorID != uuid {
-		http.Error(w, errors.New("userID not same as uuid").Error(), http.StatusUnauthorized)
-		log.Print(err.Error())
+		http.Error(w, "You are not authorized to delete", http.StatusUnauthorized)
 		return
 	}
 
 	// Delete the post since by now we're authorized to do so
-	_, err = DB.Exec("DELETE FROM posts WHERE authorID=?", authorID/)
-	
+	_, err = DB.Exec("DELETE FROM posts WHERE authorID=?", authorID)
+
 	// Check for errors in executing the query
 	// YOUR CODE HERE
 	if err != nil {
@@ -275,7 +308,8 @@ func getFeed(w http.ResponseWriter, r *http.Request) {
 
 	// convert startIndex to int
 	// YOUR CODE HERE
-	
+	startIndex, _ := strconv.Atoi(mux.Vars(r)["startIndex"])
+
 	// Check for errors in converting
 	// If error, return http.StatusBadRequest
 	// YOUR CODE HERE
@@ -283,25 +317,63 @@ func getFeed(w http.ResponseWriter, r *http.Request) {
 	// Get the userID from the access_token
 	// You should now be familiar with how to do so
 	// YOUR CODE HERE
-	  
+	cookie, err := r.Cookie("access_token")
+	if err != nil {
+		http.Error(w, errors.New("error obtaining cookie: "+err.Error()).Error(), http.StatusBadRequest)
+		log.Print(err.Error())
+	}
+	claims, err := ValidateToken(cookie.Value)
+	if err != nil {
+		http.Error(w, errors.New("error validating token: "+err.Error()).Error(), http.StatusUnauthorized)
+		log.Print(err.Error())
+	}
+	log.Println(claims)
+
+	userID := claims["UserID"].(string)
+
 	// Obtain all of the posts where the authorID is *NOT* the current authorID
 	// Sort chronologically
 	// Always limit to 25 queries
 	// Always start at an offset of startIndex
-	posts, err := DB.Query("YOUR CODE HERE", /* YOUR CODE HERE */, /* YOUR CODE HERE */)
-	
+	posts, err := DB.Query("SELECT * FROM posts WHERE authorID<>? ORDER BY postTime LIMIT ?, 25", userID, startIndex)
+
 	// Check for errors in executing the query
 	// YOUR CODE HERE
+	if err != nil {
+		http.Error(w, errors.New("error retrieve 25 posts").Error(), http.StatusBadRequest)
+		log.Print(err.Error())
+		return
+	}
 	var (
-		content string
-		postID string
-		userid string
+		content  string
+		postID   string
+		userid   string
 		postTime time.Time
 	)
 
 	// Put all the posts into an array of Max Size 25 and return all the filled spots
 	// Almost exaclty like getPosts()
 	// YOUR CODE HERE
+	numPosts := 0
+	postsArray := make([]Post, 25)
+	for i := 0; i < 25 && posts.Next(); i++ {
+		err = posts.Scan(&content, &postID, &userid, &postTime)
 
-  return
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Print(err.Error())
+		}
+
+		numPosts++
+		postsArray[i] = Post{PostBody: content, PostID: postID, AuthorID: userid, PostTime: postTime}
+	}
+	posts.Close()
+	err = posts.Err()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Print(err.Error())
+	}
+
+	json.NewEncoder(w).Encode(postsArray[:numPosts])
+	return
 }
